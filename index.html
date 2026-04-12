@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T-Seguro Ilo | Gestión Municipal</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; overflow-x: hidden; }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Estilos personalizados para scroll y selectores */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- COMPONENTE ICONO ---
+        const Icon = ({ name, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide && iconRef.current) {
+                    iconRef.current.innerHTML = '';
+                    const iconElement = document.createElement('i');
+                    iconElement.setAttribute('data-lucide', name);
+                    iconElement.className = className;
+                    iconRef.current.appendChild(iconElement);
+                    window.lucide.createIcons();
+                }
+            }, [name, className]);
+            return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
+        };
+
+        function App() {
+            // --- ESTADOS DE SESIÓN Y NAVEGACIÓN ---
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('buscar');
+            const [notification, setNotification] = useState(null);
+
+            // --- ESTADOS DE DATOS ---
+            const [unidades, setUnidades] = useState([
+                { id: '1', placa: 'V7X-882', empresa: 'Empresa El Algarrobal S.A.', conductor: 'Juan Quispe Mamani', dni: '45678912', finAutorizacion: '2025-12-31', marca: 'Toyota', modelo: 'Hiace', anio: '2022', tipo: 'Regular', ruta: 'Ilo - Pampa Inalámbrica', estado: 'Apto' },
+                { id: '2', placa: 'Z1B-445', empresa: 'Asoc. Taxis Ilo Puerto', conductor: 'Maria Flores Cruz', dni: '12345678', finAutorizacion: '2024-05-10', marca: 'Hyundai', modelo: 'Grand I10', anio: '2021', tipo: 'Taxi', ruta: '', estado: 'Vencido' }
+            ]);
+
+            const [usuarios, setUsuarios] = useState([
+                { id: 'u1', nombre: 'Admin General', user: 'admin', pass: '123', rol: 'Administrador' },
+                { id: 'u2', nombre: 'Registrador Municipal', user: 'reg1', pass: '123', rol: 'Registrador' },
+                { id: 'u3', nombre: 'Inspector Garita', user: 'ins1', pass: '123', rol: 'Inspector' }
+            ]);
+
+            // --- ESTADOS DE INTERFAZ ---
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedUnidad, setSelectedUnidad] = useState(null);
+            const [formTipo, setFormTipo] = useState('Taxi');
+
+            // --- LÓGICA DE NOTIFICACIONES ---
+            const notify = (msg) => {
+                setNotification(msg);
+                setTimeout(() => setNotification(null), 3000);
+            };
+
+            // --- LÓGICA DE LOGIN ---
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const uVal = e.target.user.value;
+                const pVal = e.target.password.value;
+                const found = usuarios.find(u => u.user === uVal && u.pass === pVal);
+                
+                if (found) {
+                    setCurrentUser(found);
+                    setIsLoggedIn(true);
+                    notify(`Sesión iniciada como ${found.rol}`);
+                    // Redirección inicial por rol
+                    if (found.rol === 'Inspector') setActiveTab('buscar');
+                    else if (found.rol === 'Registrador') setActiveTab('registro');
+                    else setActiveTab('reportes');
+                } else {
+                    notify("Error: Credenciales no válidas");
+                }
+            };
+
+            // --- LÓGICA DE UNIDADES ---
+            const registrarUnidad = (e) => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const nueva = {
+                    id: Date.now().toString(),
+                    placa: formData.get('placa').toUpperCase(),
+                    dni: formData.get('dni'),
+                    conductor: formData.get('conductor'),
+                    marca: formData.get('marca'),
+                    modelo: formData.get('modelo'),
+                    anio: formData.get('anio'),
+                    tipo: formData.get('tipo'),
+                    ruta: formData.get('ruta') || 'N/A',
+                    finAutorizacion: formData.get('vencimiento'),
+                    empresa: formData.get('empresa'),
+                    estado: 'Apto'
+                };
+                setUnidades([nueva, ...unidades]);
+                notify("Unidad guardada en el padrón");
+                e.target.reset();
+                setFormTipo('Taxi');
+            };
+
+            const buscarUnidad = () => {
+                if (!searchTerm) return notify("Ingrese Placa o DNI");
+                const found = unidades.find(u => u.placa === searchTerm || u.dni === searchTerm);
+                if (found) setSelectedUnidad(found);
+                else notify("No se encontró registro oficial");
+            };
+
+            // --- LÓGICA DE USUARIOS ---
+            const crearUsuario = (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const nuevo = {
+                    id: Date.now().toString(),
+                    nombre: fd.get('nombre'),
+                    user: fd.get('user'),
+                    pass: fd.get('pass'),
+                    rol: fd.get('rol')
+                };
+                setUsuarios([...usuarios, nuevo]);
+                notify("Nuevo usuario habilitado");
+                e.target.reset();
+            };
+
+            const borrarUsuario = (id) => {
+                if (id === currentUser.id) return notify("No puedes eliminar tu propia cuenta");
+                setUsuarios(usuarios.filter(u => u.id !== id));
+                notify("Acceso revocado");
+            };
+
+            // --- ESTADÍSTICAS DASHBOARD ---
+            const stats = useMemo(() => {
+                const total = unidades.length;
+                const hoy = new Date();
+                const vencidas = unidades.filter(u => new Date(u.finAutorizacion) < hoy).length;
+                const porTipo = {
+                    taxis: unidades.filter(u => u.tipo === 'Taxi').length,
+                    regular: unidades.filter(u => u.tipo === 'Regular').length,
+                    otros: unidades.filter(u => u.tipo !== 'Taxi' && u.tipo !== 'Regular').length
+                };
+                return { total, vencidas, aptas: total - vencidas, ...porTipo };
+            }, [unidades]);
+
+            // --- RENDER LOGIN ---
+            if (!isLoggedIn) {
+                return (
+                    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+                        <div className="w-full max-w-md bg-white rounded-[3rem] p-10 shadow-2xl animate-fade-in text-center">
+                            <div className="bg-indigo-600 w-20 h-20 rounded-3xl flex items-center justify-center text-white mx-auto mb-8 shadow-lg">
+                                <Icon name="shield-check" className="w-10 h-10" />
+                            </div>
+                            <h1 className="text-3xl font-black tracking-tighter uppercase text-slate-900 leading-none">T-Seguro Ilo</h1>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-3 mb-10">Municipalidad Provincial de Ilo</p>
+                            <form onSubmit={handleLogin} className="space-y-4">
+                                <div className="text-left space-y-1">
+                                    <label className="text-[9px] font-black text-slate-400 uppercase ml-4">Usuario</label>
+                                    <input name="user" required className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-500 transition-all" />
+                                </div>
+                                <div className="text-left space-y-1">
+                                    <label className="text-[9px] font-black text-slate-400 uppercase ml-4">Contraseña</label>
+                                    <input name="password" type="password" required className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-500 transition-all" />
+                                </div>
+                                <button className="w-full bg-slate-900 text-white p-6 rounded-[2rem] font-black uppercase text-xs tracking-widest hover:bg-indigo-600 transition-all shadow-xl mt-4">Acceder al Sistema</button>
+                            </form>
+                            <p className="mt-8 text-[9px] text-slate-300 font-medium italic">v4.0.0 Stable Build</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col lg:flex-row">
+                    {/* Sidebar Navegación */}
+                    <aside className="w-full lg:w-72 bg-slate-900 text-white p-6 flex flex-col gap-6 shadow-2xl z-20">
+                        <div className="flex items-center gap-3 px-4 mb-6">
+                            <div className="bg-indigo-600 p-2 rounded-xl"><Icon name="shield-check" /></div>
+                            <span className="text-xl font-black uppercase tracking-tighter italic">T-Seguro</span>
+                        </div>
+                        
+                        <nav className="flex-1 space-y-1">
+                            <NavItem active={activeTab === 'buscar'} onClick={() => setActiveTab('buscar')} icon="search" label="Consulta Rápida" />
+                            
+                            {(currentUser.rol === 'Administrador' || currentUser.rol === 'Registrador') && (
+                                <>
+                                    <NavItem active={activeTab === 'registro'} onClick={() => setActiveTab('registro')} icon="plus-square" label="Registro de Unidad" />
+                                    <NavItem active={activeTab === 'masiva'} onClick={() => setActiveTab('masiva')} icon="file-spreadsheet" label="Carga Masiva" />
+                                </>
+                            )}
+
+                            {currentUser.rol === 'Administrador' && (
+                                <>
+                                    <div className="h-px bg-slate-800 my-4 mx-4 opacity-50"></div>
+                                    <NavItem active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} icon="bar-chart-3" label="Dashboard" />
+                                    <NavItem active={activeTab === 'usuarios'} onClick={() => setActiveTab('usuarios')} icon="users" label="Accesos" />
+                                </>
+                            )}
+                        </nav>
+
+                        <div className="pt-6 border-t border-slate-800 flex items-center gap-4 px-4">
+                            <div className="w-10 h-10 bg-indigo-500 rounded-2xl flex items-center justify-center font-bold text-white uppercase text-xl shadow-lg shadow-indigo-500/20">{currentUser.nombre[0]}</div>
+                            <div className="flex-1 overflow-hidden">
+                                <p className="text-[10px] font-black uppercase truncate leading-none mb-1">{currentUser.nombre}</p>
+                                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tight">{currentUser.rol}</p>
+                            </div>
+                            <button onClick={() => setIsLoggedIn(false)} className="text-slate-500 hover:text-red-400 transition-colors"><Icon name="power" /></button>
+                        </div>
+                    </aside>
+
+                    {/* Contenedor Principal */}
+                    <main className="flex-1 p-6 lg:p-12 overflow-y-auto">
+                        <div className="max-w-6xl mx-auto">
+                            
+                            {/* VISTA: DASHBOARD / REPORTES */}
+                            {activeTab === 'reportes' && (
+                                <div className="space-y-10 animate-fade-in">
+                                    <div className="flex justify-between items-end">
+                                        <div>
+                                            <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase">Estado General</h2>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Resumen de flota autorizada en Ilo</p>
+                                        </div>
+                                        <button onClick={() => window.print()} className="bg-white p-4 rounded-2xl border border-slate-200 text-slate-400 hover:text-slate-900 transition-all shadow-sm">
+                                            <Icon name="printer" />
+                                        </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                                        <StatCard label="Total Unidades" value={stats.total} icon="truck" color="bg-indigo-600" />
+                                        <StatCard label="Vigentes" value={stats.aptas} icon="check-circle" color="bg-emerald-500" />
+                                        <StatCard label="Vencidos" value={stats.vencidas} icon="alert-octagon" color="bg-rose-500" />
+                                        <StatCard label="Servicio Taxi" value={stats.taxis} icon="car" color="bg-amber-500" />
+                                    </div>
+
+                                    <div className="bg-white rounded-[3rem] shadow-sm border border-slate-100 overflow-hidden">
+                                        <div className="p-10 border-b border-slate-50">
+                                            <h3 className="text-xl font-black uppercase tracking-tighter text-slate-900">Listado Maestro de Unidades</h3>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left">
+                                                <thead className="bg-slate-50">
+                                                    <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                                        <th className="p-8">Placa</th>
+                                                        <th className="p-8">Servicio</th>
+                                                        <th className="p-8">Empresa / Conductor</th>
+                                                        <th className="p-8">Vencimiento</th>
+                                                        <th className="p-8">Acción</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-50">
+                                                    {unidades.map(u => (
+                                                        <tr key={u.id} className="hover:bg-slate-50/50 transition-all text-sm group">
+                                                            <td className="p-8"><span className="text-xl font-black text-slate-900 group-hover:text-indigo-600 transition-colors">{u.placa}</span></td>
+                                                            <td className="p-8"><span className="px-3 py-1 bg-slate-100 rounded-lg font-black text-[9px] uppercase text-slate-500">{u.tipo}</span></td>
+                                                            <td className="p-8 leading-tight">
+                                                                <p className="font-black text-slate-700 uppercase mb-1">{u.empresa}</p>
+                                                                <p className="text-[10px] font-bold text-slate-400 uppercase">{u.conductor}</p>
+                                                            </td>
+                                                            <td className="p-8">
+                                                                <span className={`font-black text-xs ${new Date(u.finAutorizacion) < new Date() ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                                                    {u.finAutorizacion}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-8">
+                                                                <button onClick={() => setSelectedUnidad(u)} className="p-3 bg-slate-100 text-slate-400 hover:bg-slate-900 hover:text-white rounded-xl transition-all">
+                                                                    <Icon name="maximize-2" />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VISTA: CONSULTA */}
+                            {activeTab === 'buscar' && (
+                                <div className="text-center py-20 animate-fade-in max-w-2xl mx-auto">
+                                    <div className="bg-indigo-100 w-24 h-24 rounded-[2rem] flex items-center justify-center text-indigo-600 mx-auto mb-10 shadow-inner">
+                                        <Icon name="search" className="w-10 h-10" />
+                                    </div>
+                                    <h2 className="text-5xl font-black text-slate-900 tracking-tighter uppercase mb-4">Buscador</h2>
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-12 italic">Padrón de transporte Moquegua - Ilo</p>
+                                    <div className="relative group">
+                                        <input 
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
+                                            onKeyPress={(e) => e.key === 'Enter' && buscarUnidad()}
+                                            placeholder="PLACA O DNI"
+                                            className="w-full bg-white p-10 rounded-[3.5rem] text-4xl font-black text-center shadow-2xl outline-none border-8 border-transparent focus:border-indigo-100 transition-all placeholder:text-slate-100"
+                                        />
+                                        <button onClick={buscarUnidad} className="absolute right-4 top-4 bottom-4 w-24 bg-slate-900 text-white rounded-[2rem] flex items-center justify-center hover:bg-indigo-600 transition-all shadow-xl group-hover:scale-105">
+                                            <Icon name="arrow-right" className="w-8 h-8" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VISTA: REGISTRO AMPLIADO */}
+                            {activeTab === 'registro' && (
+                                <div className="bg-white p-10 lg:p-16 rounded-[4rem] shadow-xl border border-slate-50 animate-fade-in">
+                                    <div className="flex items-center gap-6 mb-12">
+                                        <div className="p-5 bg-indigo-50 text-indigo-600 rounded-3xl"><Icon name="edit-3" className="w-8 h-8" /></div>
+                                        <div>
+                                            <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter leading-none">Alta de Vehículo</h2>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase mt-2 tracking-widest">Ingrese los datos técnicos de la unidad</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <form onSubmit={registrarUnidad} className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                                        <div className="md:col-span-1">
+                                            <Field label="Número de Placa" name="placa" placeholder="V7X-882" required />
+                                        </div>
+                                        <div className="md:col-span-1">
+                                            <Field label="DNI Conductor" name="dni" placeholder="45678912" required />
+                                        </div>
+                                        <div className="md:col-span-1">
+                                            <Field label="Nombre Conductor" name="conductor" placeholder="Nombre completo" required />
+                                        </div>
+                                        
+                                        <div className="md:col-span-3 h-px bg-slate-100 my-4"></div>
+
+                                        <Field label="Marca" name="marca" placeholder="Toyota" required />
+                                        <Field label="Modelo" name="modelo" placeholder="Hiace" required />
+                                        <Field label="Año de Fab." name="anio" type="number" placeholder="2022" required />
+                                        
+                                        <div className="space-y-3">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">Tipo de Transporte</label>
+                                            <select 
+                                                name="tipo" 
+                                                required
+                                                className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-100 transition-all appearance-none cursor-pointer"
+                                                onChange={(e) => setFormTipo(e.target.value)}
+                                            >
+                                                <option value="Taxi">Servicio Taxi</option>
+                                                <option value="Trabajadores">Personal de Trabajo</option>
+                                                <option value="Estudiantes">Transporte Escolar</option>
+                                                <option value="Regular">Transporte Regular (Ruta)</option>
+                                            </select>
+                                        </div>
+
+                                        {formTipo === 'Regular' && (
+                                            <div className="md:col-span-2">
+                                                <Field label="Especificar Ruta Autorizada" name="ruta" placeholder="Ej: Ilo - Moquegua / Ruta 01" required />
+                                            </div>
+                                        )}
+                                        
+                                        <Field label="Fecha Venc. Permiso" name="vencimiento" type="date" required />
+                                        <div className={formTipo === 'Regular' ? 'md:col-span-3' : 'md:col-span-2'}>
+                                            <Field label="Empresa / Asociación Responsable" name="empresa" placeholder="Razón Social Completa" required />
+                                        </div>
+
+                                        <div className="md:col-span-3 pt-10">
+                                            <button className="w-full bg-slate-900 text-white p-8 rounded-[2.5rem] font-black uppercase tracking-widest text-sm hover:bg-indigo-600 shadow-2xl transition-all transform hover:-translate-y-1">Guardar Registro en Base de Datos</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            )}
+
+                            {/* VISTA: CARGA MASIVA */}
+                            {activeTab === 'masiva' && (
+                                <div className="bg-white p-20 rounded-[4rem] text-center space-y-10 animate-fade-in border border-slate-50 shadow-sm">
+                                    <div className="bg-amber-50 w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto text-amber-500 shadow-inner">
+                                        <Icon name="upload-cloud" className="w-10 h-10" />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">Importación Masiva</h2>
+                                        <p className="text-slate-400 text-sm mt-3 max-w-sm mx-auto font-medium leading-relaxed">Sincroniza la base de datos municipal subiendo un archivo Excel con el formato oficial del padrón.</p>
+                                    </div>
+                                    <div className="border-4 border-dashed border-slate-100 rounded-[3.5rem] p-24 hover:border-indigo-200 transition-all cursor-pointer group hover:bg-slate-50/50">
+                                        <Icon name="file-spreadsheet" className="w-16 h-16 text-slate-100 group-hover:text-indigo-200 mb-6 mx-auto transition-colors" />
+                                        <p className="font-black text-slate-300 uppercase tracking-widest text-[10px] group-hover:text-indigo-400 transition-colors">Selecciona tu archivo .XLSX</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* VISTA: GESTIÓN DE ACCESOS */}
+                            {activeTab === 'usuarios' && (
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 animate-fade-in">
+                                    <div className="lg:col-span-1 bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 h-fit sticky top-12">
+                                        <h3 className="text-xl font-black uppercase mb-8 tracking-tighter text-slate-900 leading-none">Alta de Usuario</h3>
+                                        <form onSubmit={crearUsuario} className="space-y-5">
+                                            <Field label="Nombre Completo" name="nombre" placeholder="Nombre del oficial" required />
+                                            <Field label="Usuario Acceso" name="user" placeholder="ej: jquispe" required />
+                                            <Field label="Contraseña" name="pass" type="password" placeholder="••••••" required />
+                                            <div className="space-y-3">
+                                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">Nivel de Acceso</label>
+                                                <select name="rol" className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none appearance-none cursor-pointer">
+                                                    <option value="Administrador">Administrador (Total)</option>
+                                                    <option value="Registrador">Registrador (Ingreso)</option>
+                                                    <option value="Inspector">Inspector (Solo Consulta)</option>
+                                                </select>
+                                            </div>
+                                            <button className="w-full bg-indigo-600 text-white p-6 rounded-[2rem] font-black uppercase text-[10px] tracking-widest shadow-lg shadow-indigo-200 hover:bg-slate-900 transition-all mt-4">Habilitar Cuenta</button>
+                                        </form>
+                                    </div>
+                                    <div className="lg:col-span-2 space-y-4">
+                                        <div className="flex justify-between items-center mb-4 px-4">
+                                            <h3 className="text-xl font-black uppercase tracking-tighter text-slate-900">Personal Autorizado</h3>
+                                            <span className="bg-slate-100 text-slate-400 px-4 py-1 rounded-full text-[10px] font-black">{usuarios.length} ACTIVOS</span>
+                                        </div>
+                                        {usuarios.map(u => (
+                                            <div key={u.id} className="bg-white p-6 rounded-3xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-all group">
+                                                <div className="flex items-center gap-5">
+                                                    <div className="w-14 h-14 bg-slate-50 text-slate-900 rounded-2xl flex items-center justify-center font-black text-xl shadow-sm group-hover:bg-indigo-600 group-hover:text-white transition-all">{u.nombre[0]}</div>
+                                                    <div>
+                                                        <p className="font-black text-slate-900 uppercase text-sm leading-tight">{u.nombre}</p>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <span className="text-[9px] font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg uppercase">{u.rol}</span>
+                                                            <span className="text-[9px] font-bold text-slate-400 uppercase">USR: {u.user}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <button onClick={() => borrarUsuario(u.id)} className="p-4 text-slate-200 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all">
+                                                    <Icon name="trash-2" className="w-6 h-6" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                        </div>
+                    </main>
+
+                    {/* MODAL DETALLE DE UNIDAD (FICHA TÉCNICA) */}
+                    {selectedUnidad && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+                            <div className="bg-white w-full max-w-5xl rounded-[4.5rem] overflow-hidden shadow-2xl flex flex-col md:flex-row relative">
+                                <button onClick={() => setSelectedUnidad(null)} className="absolute top-10 right-10 p-5 bg-slate-50 text-slate-400 rounded-full hover:text-red-500 transition-all z-10"><Icon name="x" className="w-8 h-8" /></button>
+                                
+                                <div className="w-full md:w-[35%] bg-slate-50 p-12 lg:p-16 flex flex-col items-center justify-center text-center border-r border-slate-100">
+                                    <div className="bg-white p-10 rounded-[3rem] shadow-2xl border-[12px] border-slate-900 mb-10 w-full transform -rotate-2">
+                                        <h4 className="text-5xl font-black text-slate-900 tracking-tighter uppercase leading-none">{selectedUnidad.placa}</h4>
+                                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.3em] mt-3">Placa Autorizada</p>
+                                    </div>
+                                    <Icon name="truck" className="w-20 h-20 text-slate-200 mb-6" />
+                                    <h5 className="text-2xl font-black text-slate-800 uppercase tracking-tighter leading-tight">{selectedUnidad.marca} {selectedUnidad.modelo}</h5>
+                                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-2">Fabricación: {selectedUnidad.anio}</p>
+                                </div>
+
+                                <div className="flex-1 p-12 lg:p-20 space-y-12">
+                                    <div className="grid grid-cols-2 gap-x-12 gap-y-10">
+                                        <DetailItem label="Tipo de Transporte" value={selectedUnidad.tipo} />
+                                        <DetailItem label="Ruta / Itinerario" value={selectedUnidad.ruta} />
+                                        <DetailItem label="Nombre del Conductor" value={selectedUnidad.conductor} />
+                                        <DetailItem label="Documento Identidad" value={`DNI ${selectedUnidad.dni}`} />
+                                        <div className="col-span-2">
+                                            <DetailItem label="Entidad / Empresa" value={selectedUnidad.empresa} />
+                                        </div>
+                                    </div>
+                                    
+                                    <div className={`p-10 rounded-[3.5rem] flex items-center justify-between shadow-xl ${new Date(selectedUnidad.finAutorizacion) < new Date() ? 'bg-rose-500' : 'bg-emerald-500'} text-white`}>
+                                        <div className="flex items-center gap-6">
+                                            <div className="bg-white/20 p-4 rounded-3xl"><Icon name={new Date(selectedUnidad.finAutorizacion) < new Date() ? "shield-alert" : "shield-check"} className="w-8 h-8" /></div>
+                                            <div>
+                                                <p className="text-[10px] font-black uppercase opacity-60 tracking-widest">Estatus Legal</p>
+                                                <h5 className="text-3xl font-black uppercase tracking-tighter leading-none">{new Date(selectedUnidad.finAutorizacion) < new Date() ? 'VENCIDO' : 'AUTORIZADO'}</h5>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-[10px] font-black uppercase opacity-60 tracking-widest">Fecha Expiración</p>
+                                            <p className="text-2xl font-black">{selectedUnidad.finAutorizacion}</p>
+                                        </div>
+                                    </div>
+
+                                    <button onClick={() => setSelectedUnidad(null)} className="w-full bg-slate-900 text-white p-7 rounded-[2rem] font-black uppercase text-xs tracking-[0.2em] hover:bg-indigo-600 transition-all shadow-xl shadow-slate-200">Cerrar Información</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* NOTIFICACIONES TIPO TOAST */}
+                    {notification && (
+                        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-10 py-6 rounded-[2rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-[0_20px_50px_rgba(0,0,0,0.3)] z-[200] animate-fade-in flex items-center gap-4 border border-slate-800">
+                            <div className="bg-emerald-500/20 p-2 rounded-lg"><Icon name="check" className="text-emerald-400 w-4 h-4" /></div>
+                            {notification}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // --- SUBCOMPONENTES ---
+        const NavItem = ({ active, onClick, icon, label }) => (
+            <button 
+                onClick={onClick} 
+                className={`w-full flex items-center gap-5 p-5 rounded-2xl transition-all group ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/20' : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-300'}`}
+            >
+                <Icon name={icon} className={`${active ? 'text-white' : 'text-slate-600 group-hover:text-indigo-400'}`} />
+                <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+            </button>
+        );
+
+        const Field = ({ label, name, placeholder, type = "text", required = false }) => (
+            <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">{label}</label>
+                <input 
+                    name={name} 
+                    type={type} 
+                    required={required} 
+                    placeholder={placeholder} 
+                    className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-100 transition-all placeholder:text-slate-300" 
+                />
+            </div>
+        );
+
+        const DetailItem = ({ label, value }) => (
+            <div>
+                <p className="text-[9px] font-black text-indigo-500 uppercase tracking-[0.1em] mb-2">{label}</p>
+                <p className="text-lg font-black text-slate-900 uppercase leading-none">{value || 'No especificado'}</p>
+            </div>
+        );
+
+        const StatCard = ({ label, value, icon, color }) => (
+            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center gap-6 hover:shadow-md transition-all">
+                <div className={`${color} p-5 rounded-2xl text-white shadow-lg`}><Icon name={icon} className="w-7 h-7" /></div>
+                <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-2">{label}</p>
+                    <p className="text-4xl font-black text-slate-900 leading-none">{value}</p>
+                </div>
+            </div>
+        );
+
+        // --- INICIALIZACIÓN ---
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
+    </script>
+</body>
+</html>
