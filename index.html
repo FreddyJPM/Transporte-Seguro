@@ -1,549 +1,586 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>T-Seguro Ilo | Gestión Municipal</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel for JSX -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- SheetJS para Carga Masiva Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
-        body { font-family: 'Inter', sans-serif; overflow-x: hidden; background-color: #f8fafc; }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        input:disabled { background: transparent; border-color: transparent; padding-left: 0; color: #0f172a; cursor: default; }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInWithCustomToken, 
+  signInAnonymously, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  collection, 
+  onSnapshot, 
+  deleteDoc,
+  updateDoc,
+  serverTimestamp,
+  getDoc,
+  getDocs,
+  writeBatch,
+  addDoc
+} from 'firebase/firestore';
+import { 
+  ShieldCheck, 
+  Search, 
+  PlusCircle, 
+  FileUp, 
+  LayoutDashboard, 
+  Users, 
+  LogOut, 
+  Truck, 
+  CheckCircle, 
+  AlertOctagon, 
+  X, 
+  Fingerprint,
+  Clock,
+  ShieldAlert,
+  UserCheck,
+  Eye,
+  Settings,
+  UploadCloud,
+  FileSpreadsheet,
+  Info,
+  Calendar,
+  History,
+  User,
+  AlertCircle
+} from 'lucide-react';
 
-    <script type="text/babel">
-        const { useState, useEffect, useRef, useMemo } = React;
+// --- CONFIGURACIÓN DE FIREBASE ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 't-seguro-ilo-v6';
 
-        // --- COMPONENTE DE ICONOS ---
-        const Icon = ({ name, className = "" }) => {
-            const iconRef = useRef(null);
-            useEffect(() => {
-                if (window.lucide && iconRef.current) {
-                    iconRef.current.innerHTML = '';
-                    const iconElement = document.createElement('i');
-                    iconElement.setAttribute('data-lucide', name);
-                    iconElement.className = className;
-                    iconRef.current.appendChild(iconElement);
-                    window.lucide.createIcons();
-                }
-            }, [name, className]);
-            return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
-        };
+const ROLES = {
+  ADMIN: 'Administrador',
+  REGISTRADOR: 'Registrador',
+  INSPECTOR: 'Inspector',
+  INVITADO: 'Invitado'
+};
 
-        function App() {
-            const [isLoggedIn, setIsLoggedIn] = useState(false);
-            const [currentUser, setCurrentUser] = useState(null);
-            const [activeTab, setActiveTab] = useState('buscar');
-            const [notification, setNotification] = useState(null);
-            const [isEditing, setIsEditing] = useState(false);
+const TIPOS_SERVICIO = ['Taxi', 'Regular', 'Estudiantes', 'Personal'];
 
-            // --- DATOS INICIALES ---
-            const [unidades, setUnidades] = useState([
-                { id: '1', placa: 'V7X-882', dni: '45678912', conductor: 'Juan Quispe Mamani', marca: 'Toyota', modelo: 'Hiace', anio: '2022', tipo: 'Regular', ruta: 'Ilo - Pampa Inalámbrica', finAutorizacion: '2026-12-31', empresa: 'Empresa El Algarrobal S.A.' }
-            ]);
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [userRole, setUserRole] = useState(ROLES.INVITADO);
+  const [activeTab, setActiveTab] = useState('buscar');
+  const [notification, setNotification] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-            const [usuarios, setUsuarios] = useState([
-                { id: 'u1', nombre: 'Admin General', user: 'admin', pass: '123', rol: 'Administrador' },
-                { id: 'u2', nombre: 'Registrador 1', user: 'reg1', pass: '123', rol: 'Registrador' },
-                { id: 'u3', nombre: 'Inspector Campo', user: 'ins1', pass: '123', rol: 'Inspector' }
-            ]);
+  // --- ESTADO DE DATOS ---
+  const [unidades, setUnidades] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
+  const [bitacora, setBitacora] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUnidad, setSelectedUnidad] = useState(null);
+  
+  const [formTipo, setFormTipo] = useState('Taxi');
 
-            const [searchTerm, setSearchTerm] = useState('');
-            const [selectedUnidad, setSelectedUnidad] = useState(null);
-            const [formTipo, setFormTipo] = useState('Taxi');
+  // --- NORMALIZADOR DE FECHAS ROBUSTO ---
+  const parsingFecha = (fechaInput) => {
+    if (!fechaInput) return null;
+    
+    // Si viene en formato DD/MM/YYYY lo convertimos a YYYY-MM-DD
+    let dateStr = fechaInput.trim();
+    if (dateStr.includes('/')) {
+      const parts = dateStr.split('/');
+      if (parts[0].length === 2) {
+        dateStr = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      }
+    }
 
-            const notify = (msg) => {
-                setNotification(msg);
-                setTimeout(() => setNotification(null), 3000);
-            };
+    // Creamos la fecha usando la medianoche UTC para evitar errores de zona horaria
+    const date = new Date(dateStr + "T00:00:00Z");
+    return isNaN(date.getTime()) ? null : date;
+  };
 
-            // --- LÓGICA DE ACTUALIZACIÓN INDIVIDUAL ---
-            const handleUpdateUnidad = (e) => {
-                e.preventDefault();
-                const formData = new FormData(e.target);
-                const updatedData = {
-                    ...selectedUnidad,
-                    conductor: formData.get('conductor'),
-                    dni: formData.get('dni'),
-                    marca: formData.get('marca'),
-                    modelo: formData.get('modelo'),
-                    tipo: formData.get('tipo'),
-                    ruta: formData.get('ruta') || 'N/A',
-                    finAutorizacion: formData.get('vencimiento'),
-                    empresa: formData.get('empresa')
-                };
+  const esVigente = (fechaStr) => {
+    const vencimiento = parsingFecha(fechaStr);
+    if (!vencimiento) return false;
 
-                setUnidades(unidades.map(u => u.id === selectedUnidad.id ? updatedData : u));
-                setSelectedUnidad(updatedData);
-                setIsEditing(false);
-                notify("Registro actualizado exitosamente");
-            };
+    const hoy = new Date();
+    // Ponemos hoy a las 00:00:00 local para comparar solo días
+    const hoyCero = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 0, 0, 0, 0);
+    
+    // Ajustamos el vencimiento a medianoche local para la comparación
+    const vencimientoLocal = new Date(vencimiento.getUTCFullYear(), vencimiento.getUTCMonth(), vencimiento.getUTCDate(), 0, 0, 0, 0);
 
-            // --- CARGA MASIVA EXCEL CON REEMPLAZO POR PLACA ---
-            const handleExcelUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (evt) => {
-                    try {
-                        const bstr = evt.target.result;
-                        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
-                        const ws = wb.Sheets[wb.SheetNames[0]];
-                        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
-                        
-                        let contadorActualizados = 0;
-                        let contadorNuevos = 0;
+    return vencimientoLocal >= hoyCero;
+  };
 
-                        setUnidades(prev => {
-                            let copiaUnidades = [...prev];
-                            
-                            data.slice(1).forEach((fila, i) => {
-                                const placaNormalizada = String(fila[0] || '').toUpperCase().trim();
-                                if (placaNormalizada.length < 3) return;
-
-                                // Procesamiento de fecha
-                                let fechaRaw = fila[8];
-                                let fechaFinal = "";
-                                if (fechaRaw instanceof Date) {
-                                    fechaFinal = fechaRaw.toISOString().split('T')[0];
-                                } else if (typeof fechaRaw === 'string') {
-                                    const partes = fechaRaw.split(/[-/]/);
-                                    if (partes.length === 3) {
-                                        if (partes[0].length === 4) fechaFinal = `${partes[0]}-${partes[1]}-${partes[2]}`;
-                                        else fechaFinal = `${partes[2]}-${partes[1]}-${partes[0]}`;
-                                    } else { fechaFinal = fechaRaw; }
-                                }
-
-                                const nuevaUnidad = {
-                                    id: `unit-${Date.now()}-${i}`,
-                                    placa: placaNormalizada,
-                                    dni: String(fila[1] || '').trim(),
-                                    conductor: String(fila[2] || '').trim(),
-                                    marca: String(fila[3] || '').trim(),
-                                    modelo: String(fila[4] || '').trim(),
-                                    anio: String(fila[5] || '').trim(),
-                                    tipo: String(fila[6] || 'Taxi').trim(),
-                                    ruta: String(fila[7] || 'N/A').trim(),
-                                    finAutorizacion: fechaFinal,
-                                    empresa: String(fila[9] || '').trim()
-                                };
-
-                                const indexExistente = copiaUnidades.findIndex(u => u.placa === placaNormalizada);
-                                if (indexExistente !== -1) {
-                                    // Reemplazar existente
-                                    copiaUnidades[indexExistente] = { ...copiaUnidades[indexExistente], ...nuevaUnidad };
-                                    contadorActualizados++;
-                                } else {
-                                    // Agregar nuevo al inicio
-                                    copiaUnidades.unshift(nuevaUnidad);
-                                    contadorNuevos++;
-                                }
-                            });
-
-                            return copiaUnidades;
-                        });
-
-                        notify(`Carga finalizada: ${contadorNuevos} nuevos, ${contadorActualizados} actualizados`);
-                        setActiveTab('reportes');
-                    } catch (err) { 
-                        console.error(err);
-                        notify("Error procesando el archivo"); 
-                    }
-                };
-                reader.readAsBinaryString(file);
-            };
-
-            const handleLogin = (e) => {
-                e.preventDefault();
-                const found = usuarios.find(usr => usr.user === e.target.user.value && usr.pass === e.target.password.value);
-                if (found) { setCurrentUser(found); setIsLoggedIn(true); } else notify("Credenciales inválidas");
-            };
-
-            const stats = useMemo(() => {
-                const hoy = new Date();
-                const total = unidades.length;
-                const vencidas = unidades.filter(u => {
-                    const f = new Date(u.finAutorizacion);
-                    return isNaN(f.getTime()) || f < hoy;
-                }).length;
-                return { total, vencidas, aptas: total - vencidas };
-            }, [unidades]);
-
-            return (
-                <div className="min-h-screen flex flex-col lg:flex-row">
-                    {!isLoggedIn ? (
-                        <div className="min-h-screen w-full bg-slate-950 flex items-center justify-center p-6 text-center">
-                            <div className="w-full max-w-md bg-white rounded-[3rem] p-12 shadow-2xl animate-fade-in">
-                                <div className="bg-indigo-600 w-20 h-20 rounded-[2rem] flex items-center justify-center text-white mx-auto mb-8 shadow-xl">
-                                    <Icon name="shield-check" className="w-10 h-10" />
-                                </div>
-                                <h1 className="text-3xl font-black uppercase mb-10 tracking-tighter">T-Seguro Ilo</h1>
-                                <form onSubmit={handleLogin} className="space-y-4 text-left">
-                                    <input name="user" required placeholder="Usuario" className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-500" />
-                                    <input name="password" type="password" required placeholder="Contraseña" className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-500" />
-                                    <button className="w-full bg-slate-900 text-white p-6 rounded-[2rem] font-black uppercase text-xs tracking-widest hover:bg-indigo-600 transition-all">Ingresar</button>
-                                </form>
-                            </div>
-                        </div>
-                    ) : (
-                        <>
-                            {/* SIDEBAR */}
-                            <aside className="w-full lg:w-72 bg-slate-900 text-white p-6 flex flex-col gap-6 shadow-2xl z-20">
-                                <div className="flex items-center gap-3 px-4 mb-6">
-                                    <div className="bg-indigo-600 p-2 rounded-xl"><Icon name="shield-check" /></div>
-                                    <span className="text-xl font-black uppercase italic tracking-tighter">T-Seguro</span>
-                                </div>
-                                <nav className="flex-1 space-y-1">
-                                    <NavItem active={activeTab === 'buscar'} onClick={() => setActiveTab('buscar')} icon="search" label="Consulta" />
-                                    {['Administrador', 'Registrador'].includes(currentUser.rol) && (
-                                        <>
-                                            <NavItem active={activeTab === 'registro'} onClick={() => setActiveTab('registro')} icon="plus-circle" label="Registro" />
-                                            <NavItem active={activeTab === 'masiva'} onClick={() => setActiveTab('masiva')} icon="file-up" label="Carga Masiva" />
-                                        </>
-                                    )}
-                                    {currentUser.rol === 'Administrador' && (
-                                        <>
-                                            <NavItem active={activeTab === 'reportes'} onClick={() => setActiveTab('reportes')} icon="layout-dashboard" label="Padrón" />
-                                            <NavItem active={activeTab === 'usuarios'} onClick={() => setActiveTab('usuarios')} icon="users" label="Accesos" />
-                                        </>
-                                    )}
-                                </nav>
-                                <div className="pt-6 border-t border-slate-800 flex items-center gap-4 px-4">
-                                    <div className="flex-1 overflow-hidden">
-                                        <p className="text-[10px] font-black uppercase truncate">{currentUser.nombre}</p>
-                                        <p className="text-[9px] text-slate-500 font-bold uppercase">{currentUser.rol}</p>
-                                    </div>
-                                    <button onClick={() => setIsLoggedIn(false)} className="text-slate-500 hover:text-red-400 transition-all"><Icon name="log-out" /></button>
-                                </div>
-                            </aside>
-
-                            {/* MAIN CONTENT */}
-                            <main className="flex-1 p-6 lg:p-12 overflow-y-auto custom-scrollbar">
-                                <div className="max-w-6xl mx-auto">
-                                    
-                                    {/* DASHBOARD / PADRON */}
-                                    {activeTab === 'reportes' && (
-                                        <div className="space-y-10 animate-fade-in">
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-left">
-                                                <StatCard label="Total" value={stats.total} icon="truck" color="bg-indigo-600" />
-                                                <StatCard label="Aptas" value={stats.aptas} icon="check-circle" color="bg-emerald-500" />
-                                                <StatCard label="Vencidas" value={stats.vencidas} icon="alert-octagon" color="bg-rose-500" />
-                                            </div>
-                                            <div className="bg-white rounded-[3rem] shadow-sm border border-slate-100 overflow-hidden">
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full text-left">
-                                                        <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                                            <tr><th className="p-8">Placa</th><th className="p-8">Conductor</th><th className="p-8">Tipo de Servicio</th><th className="p-8">Estado</th></tr>
-                                                        </thead>
-                                                        <tbody className="divide-y divide-slate-50">
-                                                            {unidades.map(u => (
-                                                                <tr key={u.id} className="hover:bg-slate-50 cursor-pointer" onClick={() => setSelectedUnidad(u)}>
-                                                                    <td className="p-8 font-black text-xl">{u.placa}</td>
-                                                                    <td className="p-8 text-xs font-bold uppercase">{u.conductor}</td>
-                                                                    <td className="p-8 text-[10px] font-black text-indigo-600 uppercase">{u.tipo}</td>
-                                                                    <td className="p-8">
-                                                                        <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase ${new Date(u.finAutorizacion) < new Date() ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                                                            {new Date(u.finAutorizacion) < new Date() ? 'Vencido' : 'OK'}
-                                                                        </span>
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* CONSULTA RÁPIDA */}
-                                    {activeTab === 'buscar' && (
-                                        <div className="text-center py-20 animate-fade-in max-w-2xl mx-auto">
-                                            <h2 className="text-5xl font-black tracking-tighter uppercase mb-12 italic">Consulta de Unidad</h2>
-                                            <input 
-                                                value={searchTerm}
-                                                onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
-                                                onKeyPress={(e) => {
-                                                    if(e.key === 'Enter'){
-                                                        const f = unidades.find(u => u.placa === searchTerm || u.dni === searchTerm);
-                                                        if(f) setSelectedUnidad(f); else notify("Unidad no encontrada en el sistema");
-                                                    }
-                                                }}
-                                                placeholder="PLACA O DNI"
-                                                className="w-full bg-white p-10 rounded-[3.5rem] text-4xl font-black text-center shadow-2xl outline-none border-8 border-transparent focus:border-indigo-100 transition-all"
-                                            />
-                                            <p className="mt-8 text-slate-400 font-bold uppercase text-[10px] tracking-widest">Presione Enter para buscar</p>
-                                        </div>
-                                    )}
-
-                                    {/* REGISTRO MANUAL CON DETECCIÓN DE DUPLICADOS */}
-                                    {activeTab === 'registro' && (
-                                        <div className="bg-white p-12 rounded-[3.5rem] shadow-xl animate-fade-in border border-slate-50">
-                                            <h2 className="text-3xl font-black uppercase tracking-tighter mb-10">Registro Municipal</h2>
-                                            <form onSubmit={(e) => {
-                                                e.preventDefault();
-                                                const fd = new FormData(e.target);
-                                                const placaNew = fd.get('placa').toUpperCase().trim();
-                                                
-                                                const nuevaUnidad = {
-                                                    id: Date.now().toString(),
-                                                    placa: placaNew,
-                                                    dni: fd.get('dni'),
-                                                    conductor: fd.get('conductor'),
-                                                    marca: fd.get('marca'),
-                                                    modelo: fd.get('modelo'),
-                                                    anio: fd.get('anio'),
-                                                    tipo: fd.get('tipo'),
-                                                    ruta: fd.get('ruta') || 'N/A',
-                                                    finAutorizacion: fd.get('vencimiento'),
-                                                    empresa: fd.get('empresa')
-                                                };
-
-                                                setUnidades(prev => {
-                                                    const existe = prev.findIndex(u => u.placa === placaNew);
-                                                    if (existe !== -1) {
-                                                        const update = [...prev];
-                                                        update[existe] = nuevaUnidad;
-                                                        notify("Información de placa existente actualizada");
-                                                        return update;
-                                                    }
-                                                    notify("Unidad registrada exitosamente");
-                                                    return [nuevaUnidad, ...prev];
-                                                });
-                                                
-                                                e.target.reset();
-                                                setFormTipo('Taxi');
-                                            }} className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                                <Field label="Placa" name="placa" required />
-                                                <Field label="DNI del Conductor" name="dni" required />
-                                                <Field label="Nombre Completo" name="conductor" required />
-                                                <Field label="Marca" name="marca" required />
-                                                <Field label="Modelo" name="modelo" required />
-                                                <Field label="Año de Fab." name="anio" type="number" required />
-                                                <div className="space-y-3">
-                                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-2">Tipo de Servicio</label>
-                                                    <select name="tipo" className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-100" onChange={(e) => setFormTipo(e.target.value)}>
-                                                        <option value="Taxi">Taxi</option>
-                                                        <option value="Estudiantes">Estudiantes</option>
-                                                        <option value="Trabajadores">Trabajadores</option>
-                                                        <option value="Regular">Regular (Ruta)</option>
-                                                    </select>
-                                                </div>
-                                                {formTipo === 'Regular' && <Field label="Ruta Autorizada" name="ruta" required />}
-                                                <Field label="Fin de Autorización" name="vencimiento" type="date" required />
-                                                <div className="md:col-span-3"><Field label="Empresa / Asociación" name="empresa" required /></div>
-                                                <div className="md:col-span-3 pt-6"><button className="w-full bg-slate-900 text-white p-6 rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-xl hover:bg-indigo-600 transition-all">Guardar / Actualizar en Padrón</button></div>
-                                            </form>
-                                        </div>
-                                    )}
-
-                                    {/* CARGA MASIVA */}
-                                    {activeTab === 'masiva' && (
-                                        <div className="bg-white p-20 rounded-[4rem] text-center space-y-10 animate-fade-in shadow-sm border border-slate-100">
-                                            <h2 className="text-3xl font-black uppercase tracking-tighter">Importación Masiva</h2>
-                                            <p className="text-slate-500 font-bold -mt-6">Si la placa ya existe en el sistema, la información será reemplazada por la del archivo.</p>
-                                            <div className="relative border-4 border-dashed border-slate-100 rounded-[3.5rem] p-24 bg-slate-50/30 group">
-                                                <input type="file" accept=".xlsx, .xls" onChange={handleExcelUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-                                                <Icon name="upload-cloud" className="w-16 h-16 text-slate-200 group-hover:text-indigo-400 mb-6 mx-auto transition-all" />
-                                                <p className="font-black text-slate-300 uppercase tracking-widest text-[10px] group-hover:text-indigo-400 transition-colors">Arrastre o seleccione su archivo</p>
-                                            </div>
-                                            <div className="bg-slate-50 p-8 rounded-3xl text-left border border-slate-100">
-                                                <p className="text-indigo-600 font-black uppercase text-[11px] mb-4 tracking-widest">Aviso de Unicidad:</p>
-                                                <p className="text-slate-600 text-[10px] font-bold uppercase leading-relaxed">
-                                                    El sistema valida cada fila por el número de placa. No se crearán duplicados; se mantendrá siempre el registro más reciente procesado.
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* USUARIOS */}
-                                    {activeTab === 'usuarios' && (
-                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 animate-fade-in">
-                                            <div className="lg:col-span-1 bg-white p-10 rounded-[3rem] border border-slate-50 shadow-sm h-fit">
-                                                <h3 className="text-xl font-black uppercase mb-8 tracking-tighter italic">Nuevo Acceso</h3>
-                                                <form onSubmit={(e) => {
-                                                    e.preventDefault();
-                                                    const fd = new FormData(e.target);
-                                                    setUsuarios([...usuarios, { id: Date.now().toString(), nombre: fd.get('nombre'), user: fd.get('user'), pass: fd.get('pass'), rol: fd.get('rol') }]);
-                                                    notify("Nuevo usuario habilitado");
-                                                    e.target.reset();
-                                                }} className="space-y-5">
-                                                    <Field label="Nombre" name="nombre" required />
-                                                    <Field label="Usuario" name="user" required />
-                                                    <Field label="Clave" name="pass" type="password" required />
-                                                    <div className="space-y-3">
-                                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Nivel de Acceso</label>
-                                                        <select name="rol" className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none">
-                                                            <option value="Administrador">Administrador</option>
-                                                            <option value="Registrador">Registrador</option>
-                                                            <option value="Inspector">Inspector (Solo Lectura)</option>
-                                                        </select>
-                                                    </div>
-                                                    <button className="w-full bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg">Habilitar Cuenta</button>
-                                                </form>
-                                            </div>
-                                            <div className="lg:col-span-2 space-y-4">
-                                                <h3 className="text-xl font-black uppercase tracking-tighter px-4 mb-4">Usuarios Activos</h3>
-                                                {usuarios.map(u => (
-                                                    <div key={u.id} className="bg-white p-6 rounded-3xl border border-slate-100 flex items-center justify-between shadow-sm hover:shadow-md transition-all">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center font-bold">{u.nombre[0]}</div>
-                                                            <div>
-                                                                <p className="font-black text-slate-900 uppercase text-sm leading-none">{u.nombre}</p>
-                                                                <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mt-1">{u.rol}</p>
-                                                            </div>
-                                                        </div>
-                                                        <button onClick={() => {
-                                                            if(u.id === currentUser.id) return notify("Acción denegada: Usuario en sesión");
-                                                            setUsuarios(usuarios.filter(usr => usr.id !== u.id));
-                                                            notify("Usuario revocado");
-                                                        }} className="p-4 text-slate-200 hover:text-red-500 transition-colors"><Icon name="trash-2" /></button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </main>
-
-                            {/* MODAL DETALLE */}
-                            {selectedUnidad && (
-                                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-fade-in">
-                                    <form onSubmit={handleUpdateUnidad} className="bg-white w-full max-w-4xl rounded-[4rem] overflow-hidden shadow-2xl flex flex-col md:flex-row relative">
-                                        <button type="button" onClick={() => { setSelectedUnidad(null); setIsEditing(false); }} className="absolute top-8 right-8 p-4 bg-slate-50 rounded-full hover:text-red-500 transition-all z-10 shadow-sm"><Icon name="x" /></button>
-                                        
-                                        <div className="w-full md:w-1/3 bg-slate-50 p-12 flex flex-col items-center justify-center text-center border-r">
-                                            <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border-8 border-slate-900 mb-8 w-full font-black text-4xl">{selectedUnidad.placa}</div>
-                                            <div className="space-y-4 w-full">
-                                                {['Administrador', 'Registrador'].includes(currentUser.rol) && (
-                                                    <button 
-                                                        type="button"
-                                                        onClick={() => setIsEditing(!isEditing)}
-                                                        className={`w-full py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all ${isEditing ? 'bg-amber-100 text-amber-600' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
-                                                    >
-                                                        <Icon name={isEditing ? "eye" : "edit"} className="mr-2" />
-                                                        {isEditing ? 'Ver Detalles' : 'Editar Unidad'}
-                                                    </button>
-                                                )}
-                                                {isEditing && (
-                                                    <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all">
-                                                        Guardar Cambios
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        <div className="flex-1 p-12 lg:p-16 space-y-8 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                                            <div className="grid grid-cols-2 gap-x-8 gap-y-6">
-                                                <EditableField label="Conductor" name="conductor" value={selectedUnidad.conductor} editing={isEditing} />
-                                                <EditableField label="DNI" name="dni" value={selectedUnidad.dni} editing={isEditing} />
-                                                <EditableField label="Marca" name="marca" value={selectedUnidad.marca} editing={isEditing} />
-                                                <EditableField label="Modelo" name="modelo" value={selectedUnidad.modelo} editing={isEditing} />
-                                                
-                                                <div className="col-span-1">
-                                                    <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mb-1">Tipo de Servicio</p>
-                                                    {isEditing ? (
-                                                        <select name="tipo" defaultValue={selectedUnidad.tipo} className="w-full bg-slate-50 p-3 rounded-xl font-bold border-2 border-indigo-100 outline-none">
-                                                            <option>Taxi</option>
-                                                            <option>Estudiantes</option>
-                                                            <option>Trabajadores</option>
-                                                            <option>Regular</option>
-                                                        </select>
-                                                    ) : <p className="font-black text-slate-900 uppercase">{selectedUnidad.tipo}</p>}
-                                                </div>
-
-                                                <EditableField label="Ruta" name="ruta" value={selectedUnidad.ruta} editing={isEditing} />
-                                                <div className="col-span-2">
-                                                    <EditableField label="Asociación / Empresa" name="empresa" value={selectedUnidad.empresa} editing={isEditing} />
-                                                </div>
-                                                <div className="col-span-2">
-                                                    <EditableField label="Fecha de Vencimiento" name="vencimiento" value={selectedUnidad.finAutorizacion} type="date" editing={isEditing} />
-                                                </div>
-                                            </div>
-
-                                            {!isEditing && (
-                                                <div className={`p-8 rounded-[2.5rem] flex items-center justify-between shadow-xl ${new Date(selectedUnidad.finAutorizacion) < new Date() ? 'bg-rose-500' : 'bg-emerald-500'} text-white transition-all`}>
-                                                    <div className="flex items-center gap-4">
-                                                        <Icon name={new Date(selectedUnidad.finAutorizacion) < new Date() ? "shield-alert" : "shield-check"} className="w-8 h-8" />
-                                                        <div>
-                                                            <p className="text-[10px] font-black uppercase opacity-60">Estatus Municipal</p>
-                                                            <h5 className="text-2xl font-black uppercase tracking-tighter">{new Date(selectedUnidad.finAutorizacion) < new Date() ? 'Vencido / No Apto' : 'Vigente / Autorizado'}</h5>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </form>
-                                </div>
-                            )}
-
-                            {/* NOTIFICACIÓN */}
-                            {notification && (
-                                <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-10 py-5 rounded-full font-black text-[10px] uppercase tracking-widest shadow-2xl z-[200] animate-fade-in flex items-center gap-3">
-                                    <Icon name="check-circle" className="text-emerald-400" /> {notification}
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
-            );
+  // --- AUTENTICACIÓN ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
         }
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
+    };
+    initAuth();
 
-        // --- COMPONENTES AUXILIARES ---
-        const NavItem = ({ active, onClick, icon, label }) => (
-            <button onClick={onClick} className={`w-full flex items-center gap-5 p-5 rounded-2xl transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'}`}>
-                <Icon name={icon} />
-                <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
-            </button>
-        );
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', currentUser.uid);
+        const userSnap = await getDoc(userRef);
+        
+        const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios');
+        const allUsersSnap = await getDocs(usersRef);
+        const hasAdmin = allUsersSnap.docs.some(d => d.data().role === ROLES.ADMIN);
 
-        const Field = ({ label, name, type = "text", required = false }) => (
-            <div className="space-y-3 text-left">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">{label}</label>
-                <input name={name} type={type} required={required} className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-100 transition-all shadow-sm" />
+        if (!userSnap.exists()) {
+          const initialRole = hasAdmin ? ROLES.INVITADO : ROLES.ADMIN;
+          const initialData = {
+            uid: currentUser.uid,
+            role: initialRole,
+            lastAccess: serverTimestamp(),
+            displayName: `Usuario ${currentUser.uid.slice(0,4)}`
+          };
+          await setDoc(userRef, initialData);
+          setUserRole(initialRole);
+        } else {
+          setUserRole(userSnap.data().role || ROLES.INVITADO);
+          await updateDoc(userRef, { lastAccess: serverTimestamp() });
+        }
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- SNAPSHOTS ---
+  useEffect(() => {
+    if (!user) return;
+
+    const unsubUnidades = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'unidades'), 
+      (s) => setUnidades(s.docs.map(d => ({ id: d.id, ...d.data() }))), 
+      (e) => console.error(e));
+
+    const unsubUsuarios = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'usuarios'), 
+      (s) => setUsuarios(s.docs.map(d => ({ id: d.id, ...d.data() }))), 
+      (e) => console.error(e));
+
+    const unsubBitacora = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'bitacora'), 
+      (s) => {
+        const logs = s.docs.map(d => ({ id: d.id, ...d.data() }));
+        setBitacora(logs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
+      }, 
+      (e) => console.error(e));
+
+    return () => { unsubUnidades(); unsubUsuarios(); unsubBitacora(); };
+  }, [user]);
+
+  // --- ACCIONES ---
+  const registrarEvento = async (accion, detalle) => {
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bitacora'), {
+        userId: user.uid,
+        userName: usuarios.find(u => u.uid === user.uid)?.displayName || user.uid.slice(0,8),
+        accion,
+        detalle,
+        timestamp: serverTimestamp()
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleSearch = () => {
+    if (!searchTerm.trim()) return notify("Ingrese placa o DNI");
+    const found = unidades.find(u => u.placa === searchTerm || u.dni === searchTerm);
+    if (found) {
+      setSelectedUnidad(found);
+      registrarEvento("BÚSQUEDA", `Consultó placa/DNI: ${searchTerm}`);
+    } else {
+      notify("Sin registros encontrados");
+    }
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target.result;
+      const lines = text.split('\n');
+      const data = [];
+      const currentUserName = usuarios.find(u => u.uid === user.uid)?.displayName || 'Sistema';
+      
+      for(let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if(!line) continue;
+        
+        // Separador por coma, pero limpiando espacios y comillas
+        const cols = line.split(',').map(c => c.trim().replace(/"/g, ''));
+        
+        if(cols.length >= 8) {
+          const tipoServicio = cols[6];
+          const rutaAsignada = tipoServicio === 'Regular' ? (cols[9] || '') : '';
+          
+          // Limpieza de fecha
+          let fechaVenc = cols[7];
+          
+          data.push({
+            placa: cols[0].toUpperCase(),
+            dni: cols[1],
+            conductor: cols[2].toUpperCase(),
+            marca: cols[3].toUpperCase(),
+            modelo: cols[4].toUpperCase(),
+            anio: cols[5],
+            tipo: tipoServicio,
+            finAutorizacion: fechaVenc,
+            empresa: (cols[8] || 'PARTICULAR').toUpperCase(),
+            ruta: rutaAsignada.toUpperCase(),
+            registradoPor: user.uid,
+            registradorNombre: currentUserName
+          });
+        }
+      }
+
+      if(data.length === 0) return notify("CSV inválido o vacío");
+      
+      setIsProcessing(true);
+      try {
+        const batch = writeBatch(db);
+        data.forEach(item => {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'unidades', item.placa);
+          batch.set(docRef, { ...item, updatedAt: serverTimestamp() });
+        });
+        await batch.commit();
+        await registrarEvento("CARGA MASIVA", `Importó ${data.length} registros`);
+        notify(`Éxito: ${data.length} registros actualizados`);
+        e.target.value = null;
+      } catch (error) {
+        notify("Error en servidor al procesar carga");
+      } finally {
+        setIsProcessing(false);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const notify = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const stats = useMemo(() => {
+    const total = unidades.length;
+    const vigentes = unidades.filter(u => esVigente(u.finAutorizacion)).length;
+    return { total, aptas: vigentes, vencidas: total - vigentes };
+  }, [unidades]);
+
+  const isAdmin = userRole === ROLES.ADMIN;
+  const canModify = isAdmin || userRole === ROLES.REGISTRADOR;
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white font-black italic uppercase tracking-[0.2em]">
+      Sincronizando T-Seguro v6.7...
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50 text-slate-900 font-sans">
+      
+      {/* SIDEBAR */}
+      <aside className="w-full lg:w-72 bg-slate-900 text-white p-6 flex flex-col gap-6 shadow-2xl z-20">
+        <div className="flex items-center gap-3 px-4 mb-6">
+          <div className="bg-indigo-600 p-2 rounded-xl"><ShieldCheck /></div>
+          <div>
+            <span className="text-xl font-black uppercase italic tracking-tighter block leading-none">T-Seguro</span>
+            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">{userRole}</span>
+          </div>
+        </div>
+        
+        <nav className="flex-1 space-y-1">
+          <NavItem active={activeTab === 'buscar'} onClick={() => setActiveTab('buscar')} icon={<Search size={18}/>} label="Consultar" />
+          <NavItem active={activeTab === 'padron'} onClick={() => setActiveTab('padron')} icon={<LayoutDashboard size={18}/>} label="Padrón" />
+          <NavItem active={activeTab === 'historial'} onClick={() => setActiveTab('historial')} icon={<History size={18}/>} label="Bitácora" />
+          
+          {canModify && (
+            <>
+              <div className="px-4 py-2 mt-4 text-[8px] font-black text-slate-500 uppercase tracking-widest">Gestión de Datos</div>
+              <NavItem active={activeTab === 'registro'} onClick={() => setActiveTab('registro')} icon={<PlusCircle size={18}/>} label="Nuevo Registro" />
+              <NavItem active={activeTab === 'masiva'} onClick={() => setActiveTab('masiva')} icon={<FileUp size={18}/>} label="Carga Masiva" />
+            </>
+          )}
+          
+          {isAdmin && (
+            <>
+              <div className="px-4 py-2 mt-4 text-[8px] font-black text-slate-500 uppercase tracking-widest">Panel Control</div>
+              <NavItem active={activeTab === 'usuarios'} onClick={() => setActiveTab('usuarios')} icon={<Users size={18}/>} label="Usuarios" />
+            </>
+          )}
+        </nav>
+      </aside>
+
+      {/* CONTENIDO PRINCIPAL */}
+      <main className="flex-1 p-6 lg:p-12 overflow-y-auto">
+        <div className="max-w-6xl mx-auto">
+          
+          {activeTab === 'buscar' && (
+            <div className="text-center py-20 animate-in zoom-in duration-300 max-w-2xl mx-auto">
+              <h2 className="text-5xl font-black tracking-tighter uppercase mb-4 italic text-slate-900 text-shadow">Consultar Unidad</h2>
+              <p className="text-slate-400 font-bold uppercase text-[10px] mb-12 tracking-[0.3em]">MUNICIPALIDAD PROVINCIAL DE ILO</p>
+              
+              <div className="relative">
+                <input 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  placeholder="INGRESE PLACA O DNI"
+                  className="w-full bg-white p-10 rounded-[3.5rem] text-4xl font-black text-center shadow-2xl outline-none border-8 border-transparent focus:border-indigo-100 transition-all uppercase mb-8 placeholder:text-slate-100"
+                />
+                <button 
+                  onClick={handleSearch}
+                  className="w-full bg-indigo-600 text-white p-8 rounded-[2.5rem] font-black uppercase text-xl tracking-tighter shadow-xl hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-4"
+                >
+                  <Search size={28} /> VALIDAR EN PADRÓN
+                </button>
+              </div>
             </div>
-        );
+          )}
 
-        const EditableField = ({ label, name, value, editing, type="text" }) => (
-            <div className="text-left">
-                <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mb-1">{label}</p>
-                {editing ? (
-                    <input name={name} type={type} defaultValue={value} className="w-full bg-slate-50 p-3 rounded-xl font-bold border-2 border-indigo-100 outline-none" />
-                ) : (
-                    <p className="font-black text-slate-900 uppercase leading-none truncate">{value}</p>
-                )}
+          {activeTab === 'registro' && canModify && (
+            <div className="bg-white p-12 rounded-[4rem] shadow-2xl border border-slate-100 animate-in fade-in">
+              <div className="flex items-center gap-4 mb-10">
+                <div className="p-4 bg-indigo-50 text-indigo-600 rounded-3xl"><PlusCircle size={28}/></div>
+                <h2 className="text-3xl font-black uppercase tracking-tighter">Inscripción Directa</h2>
+              </div>
+              
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const fd = new FormData(e.target);
+                const userName = usuarios.find(u => u.uid === user.uid)?.displayName || 'Sistema';
+                const tipo = fd.get('tipo');
+                const data = {
+                  placa: fd.get('placa').toUpperCase().trim(),
+                  dni: fd.get('dni'),
+                  conductor: fd.get('conductor').toUpperCase(),
+                  marca: fd.get('marca').toUpperCase(),
+                  modelo: fd.get('modelo').toUpperCase(),
+                  anio: fd.get('anio'),
+                  tipo: tipo,
+                  ruta: tipo === 'Regular' ? fd.get('ruta')?.toUpperCase() : '',
+                  finAutorizacion: fd.get('vencimiento'),
+                  empresa: fd.get('empresa').toUpperCase(),
+                  registradoPor: user.uid,
+                  registradorNombre: userName
+                };
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'unidades', data.placa), { ...data, updatedAt: serverTimestamp() });
+                await registrarEvento("REGISTRO MANUAL", `Unidad ${data.placa} registrada`);
+                notify("Unidad guardada correctamente");
+                e.target.reset();
+              }} className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <Field label="Placa" name="placa" required />
+                <Field label="DNI" name="dni" required />
+                <Field label="Nombre Completo" name="conductor" required />
+                <Field label="Marca" name="marca" required />
+                <Field label="Modelo" name="modelo" required />
+                <Field label="Año" name="anio" type="number" required />
+                <div className="space-y-3">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Tipo de Servicio</label>
+                  <select name="tipo" value={formTipo} onChange={(e) => setFormTipo(e.target.value)} className="w-full bg-slate-50 p-5 rounded-2xl font-bold appearance-none outline-none border-2 border-transparent focus:border-indigo-100">
+                    {TIPOS_SERVICIO.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                {formTipo === 'Regular' && <Field label="Número de Ruta" name="ruta" required />}
+                <Field label="Fecha Vencimiento" name="vencimiento" type="date" required />
+                <div className="md:col-span-2"><Field label="Empresa / Asociación" name="empresa" required /></div>
+                <button className="md:col-span-3 bg-slate-900 text-white p-6 rounded-[2.5rem] font-black uppercase text-[11px] tracking-[0.2em] shadow-xl hover:bg-indigo-600 transition-all">
+                   GUARDAR UNIDAD
+                </button>
+              </form>
             </div>
-        );
+          )}
 
-        const StatCard = ({ label, value, icon, color }) => (
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center gap-6 hover:shadow-md transition-all">
-                <div className={`${color} p-4 rounded-2xl text-white shadow-lg`}><Icon name={icon} /></div>
-                <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none">{label}</p>
-                    <p className="text-4xl font-black text-slate-900 leading-none">{value}</p>
+          {activeTab === 'masiva' && canModify && (
+            <div className="bg-white p-16 rounded-[4rem] shadow-2xl border border-slate-100 text-center animate-in zoom-in duration-300">
+              <div className="w-32 h-32 bg-indigo-50 text-indigo-600 rounded-[3rem] flex items-center justify-center mx-auto mb-10">
+                {isProcessing ? <Clock size={48} className="animate-spin" /> : <UploadCloud size={48} />}
+              </div>
+              <h2 className="text-4xl font-black uppercase tracking-tighter mb-4 italic">Importar Base de Datos</h2>
+              <div className="bg-amber-50 p-6 rounded-3xl border border-amber-100 text-amber-700 text-[10px] font-bold uppercase tracking-widest mb-10 inline-block px-10">
+                 Instrucción de Fecha: Use el formato <span className="underline">YYYY-MM-DD</span> (Ej: 2025-12-31)
+              </div>
+              
+              <div className="flex flex-col items-center gap-6">
+                <input 
+                  type="file" 
+                  accept=".csv" 
+                  onChange={handleFileUpload} 
+                  id="csv-upload" 
+                  className="hidden" 
+                  disabled={isProcessing}
+                />
+                <label 
+                  htmlFor="csv-upload" 
+                  className={`cursor-pointer px-12 py-8 bg-slate-900 text-white rounded-[2.5rem] font-black uppercase text-sm tracking-widest shadow-2xl flex items-center gap-4 transition-all hover:scale-105 active:scale-95 ${isProcessing ? 'opacity-50 grayscale' : ''}`}
+                >
+                  <FileSpreadsheet size={24} /> {isProcessing ? 'ACTUALIZANDO PADRÓN...' : 'CARGAR ARCHIVO CSV'}
+                </label>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'padron' && (
+            <div className="space-y-10 animate-in fade-in">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <StatCard label="Flota Total" value={stats.total} icon={<Truck />} color="bg-slate-900" />
+                <StatCard label="Habilitados" value={stats.aptas} icon={<CheckCircle />} color="bg-emerald-500" />
+                <StatCard label="Vencidos" value={stats.vencidas} icon={<AlertOctagon />} color="bg-rose-500" />
+              </div>
+              <div className="bg-white rounded-[3.5rem] shadow-sm border border-slate-100 overflow-x-auto">
+                <table className="w-full text-left min-w-[800px]">
+                  <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                    <tr>
+                      <th className="p-8">Unidad</th>
+                      <th className="p-8">Conductor / Asociación</th>
+                      <th className="p-8">Servicio</th>
+                      <th className="p-8">Vencimiento</th>
+                      <th className="p-8">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {unidades.map(u => (
+                      <tr key={u.id} className="hover:bg-indigo-50/20 cursor-pointer" onClick={() => setSelectedUnidad(u)}>
+                        <td className="p-8 font-black text-lg text-slate-900 tracking-tighter">{u.placa}</td>
+                        <td className="p-8">
+                          <p className="font-bold text-[10px] uppercase text-slate-800">{u.conductor}</p>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">{u.empresa}</p>
+                        </td>
+                        <td className="p-8">
+                          <p className="text-[9px] font-black text-indigo-600 uppercase">{u.tipo}</p>
+                          {u.tipo === 'Regular' && <p className="text-[8px] text-slate-400 font-bold uppercase">Ruta {u.ruta || 'N/A'}</p>}
+                        </td>
+                        <td className="p-8 font-bold text-[10px] text-slate-500">{u.finAutorizacion}</td>
+                        <td className="p-8">
+                          <span className={`px-4 py-1 rounded-full text-[9px] font-black uppercase ${esVigente(u.finAutorizacion) ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                            {esVigente(u.finAutorizacion) ? 'Vigente' : 'Inactivo'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'historial' && (
+            <div className="space-y-6 animate-in slide-in-from-bottom-4">
+                <div className="bg-white rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                  {bitacora.map((log, idx) => (
+                    <div key={log.id} className="p-6 flex items-center gap-6 border-b border-slate-50 last:border-0">
+                      <div className="text-[10px] font-black text-slate-300 w-24 text-center shrink-0">
+                        {log.timestamp?.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                      <div className="flex-1">
+                        <span className="px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-tighter bg-indigo-50 text-indigo-600">
+                          {log.accion}
+                        </span>
+                        <p className="mt-1 text-xs font-bold text-slate-600 uppercase tracking-tight">{log.detalle}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black text-slate-800 uppercase">{log.userName}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
             </div>
-        );
+          )}
 
-        const root = ReactDOM.createRoot(document.getElementById("root"));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+        </div>
+      </main>
+
+      {/* MODAL DETALLES */}
+      {selectedUnidad && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl">
+          <div className="bg-white w-full max-w-4xl rounded-[4rem] overflow-hidden shadow-2xl relative animate-in zoom-in duration-300">
+            <button onClick={() => setSelectedUnidad(null)} className="absolute top-8 right-8 p-4 bg-slate-50 rounded-full hover:bg-rose-50 hover:text-rose-500 transition-all z-10 text-slate-400"><X size={20}/></button>
+            <div className="flex flex-col md:flex-row h-full">
+              <div className="w-full md:w-80 bg-slate-50 p-12 text-center flex flex-col items-center justify-center border-r border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Placa de Rodaje</p>
+                <div className="bg-white p-8 rounded-[2rem] shadow-xl border-4 border-slate-900 w-full font-black text-5xl tracking-tighter mb-4">{selectedUnidad.placa}</div>
+                <div className="px-4 py-2 bg-indigo-100 text-indigo-600 rounded-xl text-[9px] font-black uppercase tracking-widest">Año: {selectedUnidad.anio}</div>
+              </div>
+              <div className="flex-1 p-12 lg:p-16 bg-white">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
+                  <DataRow label="Nombre del Conductor" value={selectedUnidad.conductor} />
+                  <DataRow label="Documento DNI" value={selectedUnidad.dni} />
+                  <DataRow label="Modalidad" value={selectedUnidad.tipo} />
+                  <DataRow label="Operación" value={selectedUnidad.tipo === 'Regular' ? `Ruta ${selectedUnidad.ruta}` : 'SERVICIO LIBRE'} />
+                  <DataRow label="Vehículo" value={`${selectedUnidad.marca} ${selectedUnidad.modelo}`} />
+                  <DataRow label="Empresa Responsable" value={selectedUnidad.empresa} />
+                  
+                  <div className={`col-span-full p-8 rounded-[3rem] flex items-center justify-between ${esVigente(selectedUnidad.finAutorizacion) ? 'bg-emerald-50 border-2 border-emerald-100' : 'bg-rose-50 border-2 border-rose-100'}`}>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Caducidad de Autorización</p>
+                      <p className={`text-3xl font-black ${esVigente(selectedUnidad.finAutorizacion) ? 'text-emerald-600' : 'text-rose-600'}`}>{selectedUnidad.finAutorizacion}</p>
+                    </div>
+                    <div className={`px-8 py-3 rounded-full text-[11px] font-black uppercase tracking-widest ${esVigente(selectedUnidad.finAutorizacion) ? 'bg-emerald-600 text-white shadow-xl' : 'bg-rose-600 text-white shadow-xl'}`}>
+                      {esVigente(selectedUnidad.finAutorizacion) ? 'VIGENTE' : 'CADUCADO'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFICACIÓN */}
+      {notification && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-10 py-5 rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl z-[200] flex items-center gap-3 animate-in slide-in-from-bottom-5 border border-indigo-500/30">
+          <AlertCircle size={16} className="text-indigo-400" /> {notification}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- UI COMPONENTS ---
+const NavItem = ({ active, onClick, icon, label }) => (
+  <button onClick={onClick} className={`w-full flex items-center gap-4 p-4 rounded-2xl transition-all ${active ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-900/40 translate-x-1' : 'text-slate-500 hover:bg-slate-800 hover:text-white'}`}>
+    <span>{icon}</span>
+    <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+  </button>
+);
+
+const StatCard = ({ label, value, icon, color }) => (
+  <div className="bg-white p-8 rounded-[3.5rem] shadow-sm border border-slate-100 flex items-center gap-6">
+    <div className={`${color} p-5 rounded-[1.5rem] text-white`}>{icon}</div>
+    <div>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+      <p className="text-3xl font-black text-slate-900 tracking-tighter">{value}</p>
+    </div>
+  </div>
+);
+
+const Field = ({ label, name, type = "text", required = false }) => (
+  <div className="space-y-3">
+    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">{label}</label>
+    <input name={name} type={type} required={required} className="w-full bg-slate-50 p-5 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-indigo-200 transition-all" />
+  </div>
+);
+
+const DataRow = ({ label, value }) => (
+  <div className="space-y-1">
+    <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{label}</p>
+    <p className="text-sm font-black text-slate-800 uppercase">{value || '---'}</p>
+  </div>
+);
+
+const RoleBtn = ({ active, onClick, label, icon }) => (
+  <button onClick={onClick} className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all ${active ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-50 border-transparent text-slate-400'}`}>
+    {icon} <span className="text-[8px] font-black uppercase">{label}</span>
+  </button>
+);
