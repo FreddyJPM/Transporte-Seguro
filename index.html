@@ -77,7 +77,46 @@
                 setNotification(msg);
                 setTimeout(() => setNotification(null), 3000);
             };
+            
+            // --- LÓGICA DE CARGA MASIVA (EXCEL) ---
+            const handleExcelUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
 
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const wsname = wb.SheetNames[0];
+                        const ws = wb.Sheets[wsname];
+                        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+                        // Mapeo según el orden: Placa, DNI, Conductor, Marca, Modelo, Año, Tipo, Ruta, Vencimiento, Empresa
+                        const nuevasUnidades = data.slice(1).map((fila, index) => ({
+                            id: `xlsx-${Date.now()}-${index}`,
+                            placa: String(fila[0] || '').toUpperCase().trim(),
+                            dni: String(fila[1] || '').trim(),
+                            conductor: String(fila[2] || '').trim(),
+                            marca: String(fila[3] || '').trim(),
+                            modelo: String(fila[4] || '').trim(),
+                            anio: String(fila[5] || '').trim(),
+                            tipo: String(fila[6] || 'Taxi').trim(),
+                            ruta: String(fila[7] || 'N/A').trim(),
+                            finAutorizacion: String(fila[8] || '').trim(),
+                            empresa: String(fila[9] || '').trim()
+                        })).filter(u => u.placa.length > 3);
+
+                        setUnidades(prev => [...nuevasUnidades, ...prev]);
+                        notify(`Éxito: Se han importado ${nuevasUnidades.length} unidades al sistema.`);
+                        setActiveTab('reportes');
+                    } catch (err) {
+                        notify("Error: El formato del archivo no es válido.");
+                    }
+                };
+                reader.readAsBinaryString(file);
+            };
+            
             // --- LÓGICA DE LOGIN ---
             const handleLogin = (e) => {
                 e.preventDefault();
